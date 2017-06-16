@@ -1,0 +1,170 @@
+ ---
+title: "Graph network analysis"
+output:
+  html_document: default
+  html_notebook: default
+---
+
+## load libraries and set path
+```{r}
+suppressPackageStartupMessages({
+  library(igraph)
+  library(ggplot2)
+  library(dplyr)
+})
+
+setwd("C:/Users/abhinav/Documents/blockchain project")
+```
+
+## Data import
+```{r}
+blockdata.df1 <- read.csv("output/blockchain_info_sample3.csv")
+blockdata.df2 <- read.csv("output/blockchain_info_sample.csv")
+blockdata.df3 <- read.csv("output/blockchain_info_sample_150001_200000.csv")
+blockdata.df4 <- read.csv("output/blockchain_info_sample_50001_100000.csv")
+blockdata.df <- rbind(blockdata.df1,blockdata.df2,blockdata.df3,blockdata.df4)
+blockdata.df <- blockdata.df[,c('ip_add', 'op_add', 'ip_value', 'op_value', 'time' )]
+
+rm(list = c('blockdata.df1','blockdata.df2','blockdata.df3','blockdata.df4'))
+```
+
+
+##search for Silk road address in data
+```{r}
+##address length checks
+nchar('1F1tAaz5x1HUXrCNLbtMDqcw6o5GNn4xqX')
+nchar(as.character(blockdata.df$ip_add[1]))
+
+'1F1tAaz5x1HUXrCNLbtMDqcw6o5GNn4xqX' %in% as.character(blockdata.df$ip_add)
+
+```
+
+
+## make a list of addresses as nodes
+```{r}
+blockdata.nodes<- data.frame(unique(c(as.character(blockdata.df$ip_add), as.character(blockdata.df$op_add))))
+colnames(blockdata.nodes) <- c("nodes")
+```
+
+## changing addresses to integer ids
+```{r}
+start <- proc.time()
+blockdata.nodes$ad_id <- c(1:nrow(blockdata.nodes))
+temp_df <-merge(blockdata.df, blockdata.nodes, by.x= "ip_add", by.y = "nodes", suffixes = c("",".from"))
+temp_df <-merge(blockdata.df, blockdata.nodes, by.x= "ip_add", by.y = "nodes")
+temp_df <- merge(temp_df, blockdata.nodes, by.x= "op_add", by.y = "nodes")
+cat(sprintf("--- elapsed user-time: %fs ", (proc.time() - start)[1]))
+```
+
+```{r}
+temp_df <- temp_df[,c('ad_id.x', 'ad_id.y', 'ip_value', 'op_value', 'time' )]
+colnames(temp_df) <- c('from_id', 'to_id', 'ip_value', 'op_value', 'time')
+```
+
+
+## create graph from dataframe
+```{r}
+start <- proc.time()
+blockdata.graph <- graph_from_data_frame(temp_df,directed = TRUE,vertices = blockdata.nodes$ad_id)
+   cat(sprintf("--- elapsed user-time: %fs ", (proc.time() - start)[1]))
+   
+```
+--34mb
+
+## Simplify the graph by removing loops and multiple edges between the same nodes
+```{r}
+start <- proc.time()
+blockdata.graph <- simplify(blockdata.graph, remove.multiple = T, remove.loops = T, 
+edge.attr.comb=c(weight="sum", type="ignore") )
+   cat(sprintf("--- elapsed user-time: %fs ", (proc.time() - start)[1]))
+```
+--15mb
+
+## setting vertex and edges properties for plots
+```{r}
+V(blockdata.graph)$color <- "grey"
+E(blockdata.graph)$color <- "grey"
+E(blockdata.graph)$color[as.logical(blockdata.graph[,5])]<- "red"
+V(blockdata.graph)[degree(blockdata.graph, mode = "out")>4]$color <-  "yellow"
+```
+
+## creating a subgraph with high degree nodes
+```{r}
+blockdata.subgraph <- subgraph(blockdata.graph, degree(blockdata.graph, mode = "out")>4)
+blockdata.subgraph <- subgraph(blockdata.subgraph, degree(blockdata.subgraph, mode = "in")>4)
+
+```
+
+## Interactive plotting (computationally inefficient)
+```{r}
+#start <- proc.time()
+#tkplot(blockdata.graph, vertex.label = NA,vertex.size = 1, edge.arrow.size = 0.1)
+#   cat(sprintf("--- elapsed user-time: %fs ", (proc.time() - start)[1]))
+  
+```
+
+## simple plotting
+```{r}
+start <- proc.time()
+plot(blockdata.subgraph, vertex.label = NA,vertex.size = 0.1, edge.arrow.size = 0.1 )
+   cat(sprintf("--- elapsed user-time: %fs ", (proc.time() - start)[1]))
+  
+```
+
+
+##Community detection based on edge betweenness
+```{r}
+block.community <- cluster_edge_betweenness(blockdata.subgraph)
+#dendPlot(block.community, mode="hclust")
+```
+
+
+```{r}
+class(block.community)
+#length(block.community)
+#membership(block.community)
+modularity(block.community)
+#crossing(block.community, blockdata.graph)
+```
+
+```{r}
+plot(block.community, blockdata.subgraph,vertex.label = NA,vertex.size = 1, edge.arrow.size = 0.1 )
+```
+
+##Community detection based on based on propagating labels
+
+```{r}
+#block.community.prop <- cluster_label_prop(blockdata.graph)
+#plot(block.community.prop, blockdata.graph)
+```
+
+
+
+```{r}
+#scc<- clusters(blockdata.graph,"strong")
+#clusters with more than one vertex
+#v_idx <- which(scc$csize > 1)
+#unique(as.vector(graph[,1:2]))[scc$membership==v_idx[2]]
+```
+
+
+#clustering coefficient
+```{r}
+start <- proc.time()
+blockdata.graph.cc <- transitivity(blockdata.subgraph, type = c("local"), vids = blockdata.nodes$ad_id)
+cat(sprintf("--- elapsed user-time: %fs ", (proc.time() - start)[1]))
+
+```
+
+#between centrality
+```{r, message=FALSE, include=FALSE}
+start <- proc.time()
+blockdata.graph.btwnscore <- estimate_betweenness(blockdata.subgraph, vids = V(blockdata.nodes$ad_id), directed = TRUE, 5, weights = NULL, nobigint = TRUE)
+```
+
+The vertex and edge betweenness are (roughly) defined by the number of shortest paths going through a vertex or an edge.
+
+
+
+
+
